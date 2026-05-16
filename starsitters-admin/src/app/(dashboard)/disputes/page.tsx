@@ -55,10 +55,10 @@ function rowToDispute(r: DisputeRow): Dispute {
       priority,
       status,
       description: r.description ?? "",
-      clockIn: "",
-      clockOut: "",
-      calculatedHours: "—",
-      calculatedWage: "—",
+      clockIn: r.clock_in_at ? new Date(r.clock_in_at).toLocaleString() : "—",
+      clockOut: r.clock_out_at ? new Date(r.clock_out_at).toLocaleString() : "—",
+      calculatedHours: r.time_computed_minutes != null ? `${(r.time_computed_minutes / 60).toFixed(2)}h` : "—",
+      calculatedWage: r.time_computed_wage != null ? `$${Number(r.time_computed_wage).toFixed(2)}` : "—",
       messageHistory: [],
       resolutionNotes: r.resolution_notes ?? undefined,
     } satisfies DisputeDetail,
@@ -102,7 +102,9 @@ export default function DisputesPage() {
 
   useEffect(() => {
     void reload();
-  }, []);
+    const interval = setInterval(() => { void reload(); }, 30000);
+    return () => clearInterval(interval);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = useMemo(() => {
     const open = disputes.filter((d) => d.status === "Open").length;

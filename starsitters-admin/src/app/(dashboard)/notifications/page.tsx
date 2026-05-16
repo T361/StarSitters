@@ -23,7 +23,7 @@ interface NotificationLog {
 
 function mapDeliveryToStatus(ds: string | null | undefined): NotificationStatus {
   const s = (ds ?? "pending").toLowerCase();
-  if (s === "sent" || s === "mock_ok" || s === "partial") return "Delivered";
+  if (s === "sent" || s === "partial") return "Delivered";
   if (s === "failed" || s === "config_missing" || s === "invalid_sa_json") return "Failed";
   if (s === "no_devices" || s === "pending") return "Sent";
   return "Sent";

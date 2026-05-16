@@ -53,10 +53,10 @@ function rowToBabysitter(r: SitterRow): Babysitter {
       certificationStatus: cert,
       accountStatus: status,
       guardian: {
-        name: "—",
+        name: r.guardian_name ?? "—",
         relation: "—",
-        email: "—",
-        phone: "—",
+        email: r.guardian_email ?? "—",
+        phone: r.guardian_phone ?? "—",
         consentVerified: r.guardian_consent_status === "approved",
       },
       certifications: [],
@@ -90,7 +90,9 @@ function BabysittersPageInner() {
 
   useEffect(() => {
     void reload();
-  }, []);
+    const interval = setInterval(() => { void reload(); }, 30000);
+    return () => clearInterval(interval);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const q = searchParams.get("q");

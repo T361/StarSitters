@@ -97,7 +97,9 @@ function FamiliesPageInner() {
 
   useEffect(() => {
     void reload();
-  }, []);
+    const interval = setInterval(() => { void reload(); }, 30000);
+    return () => clearInterval(interval);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const q = searchParams.get("q");
