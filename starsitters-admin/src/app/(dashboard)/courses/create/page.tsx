@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   adminInsertCourse,
+  adminUploadCourseMaterial,
   type AdminCourseInsert,
   fetchAdminCoursesWithStats,
   fetchDashboardStats,
@@ -128,6 +129,7 @@ export default function CreateCoursePage() {
 
   // Step 3 state
   const [materials, setMaterials] = useState<MaterialDraft[]>([]);
+  const [materialFileObjects, setMaterialFileObjects] = useState<Map<string, File>>(new Map());
 
   // Step 4 state
   const [questions, setQuestions] = useState<QuestionDraft[]>([]);
@@ -270,19 +272,25 @@ export default function CreateCoursePage() {
     pendingMaterialTypeRef.current = null;
     if (!file || !type) return;
     const sizeMb = Math.round((file.size / (1024 * 1024)) * 100) / 100;
+    const id = `MAT-${Date.now()}`;
     setMaterials((prev) => [
       ...prev,
-      {
-        id: `MAT-${Date.now()}`,
-        name: file.name,
-        type,
-        sizeMb: Math.max(sizeMb, 0.01),
-      },
+      { id, name: file.name, type, sizeMb: Math.max(sizeMb, 0.01) },
     ]);
+    setMaterialFileObjects((prev) => {
+      const next = new Map(prev);
+      next.set(id, file);
+      return next;
+    });
   };
 
   const handleRemoveMaterial = (id: string) => {
     setMaterials((prev) => prev.filter((m) => m.id !== id));
+    setMaterialFileObjects((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
   const handleAddQuestion = () => {
@@ -365,7 +373,7 @@ export default function CreateCoursePage() {
 
     setPublishBusy(true);
     try {
-      await adminInsertCourse({
+      const courseId = await adminInsertCourse({
         name: t,
         category: category.trim(),
         status: intent === "publish" ? "published" : "draft",
@@ -378,7 +386,25 @@ export default function CreateCoursePage() {
         requirements: buildRequirementsFromMaterials(materials),
         learning_objectives: buildLearningObjectivesFromQuiz(passingScore, questions),
         provides_certificate: true,
+        material_paths: [],
       });
+
+      // Upload course material files and patch material_paths
+      if (materialFileObjects.size > 0) {
+        const uploadResults = await Promise.allSettled(
+          materials
+            .filter((m) => materialFileObjects.has(m.id))
+            .map((m) => adminUploadCourseMaterial(courseId, materialFileObjects.get(m.id)!))
+        );
+        const paths = uploadResults
+          .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
+          .map((r) => r.value);
+        if (paths.length > 0) {
+          const { createClient } = await import("@/lib/supabase/client");
+          const supabase = createClient();
+          await supabase.from("courses").update({ material_paths: paths }).eq("id", courseId);
+        }
+      }
       if (intent === "publish") {
         setToastMessage("Course published successfully!");
         setToastDescription("The course is now available for enrollment.");

@@ -93,6 +93,9 @@ export type SitterRow = {
   suspension_reason: string | null;
   total_minutes_worked: number;
   total_earnings: number;
+  guardian_name: string | null;
+  guardian_email: string | null;
+  guardian_phone: string | null;
 };
 
 export type JobRow = {
@@ -104,6 +107,9 @@ export type JobRow = {
   computed_minutes: number | null;
   computed_wage: number | null;
   timeline: { event_type: string; title: string | null; created_at: string }[];
+  location_address?: unknown;
+  location_lat?: number | null;
+  location_lng?: number | null;
 };
 
 export type DisputeRow = {
@@ -120,6 +126,10 @@ export type DisputeRow = {
   created_at: string;
   reporter_name: string | null;
   reporter_email: string | null;
+  clock_in_at: string | null;
+  clock_out_at: string | null;
+  time_computed_minutes: number | null;
+  time_computed_wage: number | null;
 };
 
 function ageFromDob(dob: string): number {
@@ -221,8 +231,22 @@ export async function fetchSitters(): Promise<SitterRow[]> {
 
   const userMap = await fetchUsersByIds(supabase, rows.map((r) => r.user_id));
 
+  const guardianMap = new Map<string, { guardian_name: string; guardian_email: string; guardian_phone: string | null }>();
+  const sitterIds = rows.map((r) => r.user_id);
+  for (let i = 0; i < sitterIds.length; i += BATCH_IN) {
+    const chunk = sitterIds.slice(i, i + BATCH_IN);
+    const { data: consents } = await supabase
+      .from("guardian_consents")
+      .select("sitter_id, guardian_name, guardian_email, guardian_phone")
+      .in("sitter_id", chunk);
+    for (const c of (consents ?? []) as { sitter_id: string; guardian_name: string; guardian_email: string; guardian_phone: string | null }[]) {
+      guardianMap.set(c.sitter_id, { guardian_name: c.guardian_name, guardian_email: c.guardian_email, guardian_phone: c.guardian_phone });
+    }
+  }
+
   return rows.map((r) => {
     const u = userMap.get(r.user_id);
+    const g = guardianMap.get(r.user_id);
     return {
       user_id: r.user_id,
       full_name: u?.full_name ?? null,
@@ -235,6 +259,9 @@ export async function fetchSitters(): Promise<SitterRow[]> {
       suspension_reason: r.suspension_reason,
       total_minutes_worked: r.total_minutes_worked,
       total_earnings: Number(r.total_earnings ?? 0),
+      guardian_name: g?.guardian_name ?? null,
+      guardian_email: g?.guardian_email ?? null,
+      guardian_phone: g?.guardian_phone ?? null,
     };
   });
 }
@@ -288,8 +315,39 @@ export async function fetchDisputes(): Promise<DisputeRow[]> {
     rows.map((d) => d.reported_by_user_id),
   );
 
+  const jobIds = uniqueIds(rows.map((d) => d.job_id));
+  const hireMap = new Map<string, string>();
+  for (let i = 0; i < jobIds.length; i += BATCH_IN) {
+    const chunk = jobIds.slice(i, i + BATCH_IN);
+    const { data: hires } = await supabase
+      .from("hires")
+      .select("id, job_id")
+      .in("job_id", chunk);
+    for (const h of (hires ?? []) as { id: string; job_id: string }[]) {
+      hireMap.set(h.job_id, h.id);
+    }
+  }
+
+  const hireIds = uniqueIds([...hireMap.values()]);
+  const timeEntryMap = new Map<string, { clock_in_at: string | null; clock_out_at: string | null; computed_minutes: number | null; computed_wage: number | null }>();
+  for (let i = 0; i < hireIds.length; i += BATCH_IN) {
+    const chunk = hireIds.slice(i, i + BATCH_IN);
+    const { data: entries } = await supabase
+      .from("time_entries")
+      .select("hire_id, clock_in_at, clock_out_at, computed_minutes, computed_wage")
+      .in("hire_id", chunk)
+      .order("clock_in_at", { ascending: false });
+    for (const e of (entries ?? []) as { hire_id: string; clock_in_at: string | null; clock_out_at: string | null; computed_minutes: number | null; computed_wage: number | null }[]) {
+      if (!timeEntryMap.has(e.hire_id)) {
+        timeEntryMap.set(e.hire_id, { clock_in_at: e.clock_in_at, clock_out_at: e.clock_out_at, computed_minutes: e.computed_minutes, computed_wage: e.computed_wage });
+      }
+    }
+  }
+
   return rows.map((d) => {
     const rep = userMap.get(d.reported_by_user_id);
+    const hireId = hireMap.get(d.job_id);
+    const te = hireId ? timeEntryMap.get(hireId) : null;
     return {
       id: d.id,
       job_id: d.job_id,
@@ -304,6 +362,10 @@ export async function fetchDisputes(): Promise<DisputeRow[]> {
       created_at: d.created_at,
       reporter_name: rep?.full_name ?? null,
       reporter_email: rep?.email ?? null,
+      clock_in_at: te?.clock_in_at ?? null,
+      clock_out_at: te?.clock_out_at ?? null,
+      time_computed_minutes: te?.computed_minutes ?? null,
+      time_computed_wage: te?.computed_wage ?? null,
     };
   });
 }
@@ -930,6 +992,7 @@ export type AdminCourseInsert = {
   requirements?: string | null;
   learning_objectives?: string | null;
   provides_certificate?: boolean;
+  material_paths?: string[];
 };
 
 export async function adminInsertCourse(payload: AdminCourseInsert): Promise<string> {
@@ -947,10 +1010,25 @@ export async function adminInsertCourse(payload: AdminCourseInsert): Promise<str
     requirements: payload.requirements ?? null,
     learning_objectives: payload.learning_objectives ?? null,
     provides_certificate: payload.provides_certificate ?? true,
+    material_paths: payload.material_paths ?? [],
   };
   const { data, error } = await supabase.from("courses").insert(row).select("id").single();
   if (error) throw error;
   return (data as { id: string }).id;
+}
+
+export async function adminUploadCourseMaterial(
+  courseId: string,
+  file: File,
+): Promise<string> {
+  const supabase = createClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${courseId}/${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage
+    .from("course-materials")
+    .upload(path, file, { upsert: false, contentType: file.type });
+  if (error) throw error;
+  return path;
 }
 
 export async function adminUpdateCourse(

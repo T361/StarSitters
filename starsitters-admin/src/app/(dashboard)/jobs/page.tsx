@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/JobDetailsModal";
 import { fetchJobs, type JobRow } from "@/lib/supabase/admin";
 import { formatSupabaseError } from "@/lib/supabase/errors";
+import { createClient } from "@/lib/supabase/client";
 
 interface Job {
   id: string;
@@ -101,7 +102,16 @@ function rowToJob(r: JobRow): Job {
           : status === "Completed"
             ? "Pending"
             : "Not completed",
-      location: "—",
+      location: (() => {
+        const a = r.location_address;
+        if (!a) return "—";
+        if (typeof a === "string") return a;
+        if (typeof a === "object" && !Array.isArray(a)) {
+          const o = a as Record<string, unknown>;
+          return (o.formatted as string) || (o.line1 as string) || (o.address as string) || "—";
+        }
+        return "—";
+      })(),
       locationVerified: false,
       hoursWorked: totalHours ?? undefined,
       totalWage: totalWage ?? undefined,
@@ -130,6 +140,7 @@ function JobsMonitoringPageInner() {
   const [tableSearch, setTableSearch] = useState("");
   const [tableFilter, setTableFilter] = useState<"all" | JobStatus>("all");
   const [selected, setSelected] = useState<JobDetail | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const search = (tableSearch || topSearch).toLowerCase();
   const statusFilter = tableFilter !== "all" ? tableFilter : topFilter;
@@ -160,7 +171,24 @@ function JobsMonitoringPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [statusFilter, search]);
+  }, [statusFilter, search, refreshTick]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setRefreshTick((t) => t + 1), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Realtime: refresh immediately when any job row changes
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel("admin-jobs-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, () => {
+        setRefreshTick((t) => t + 1);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   const summary = useMemo(() => {
     const open = jobs.filter((j) => j.status === "Open").length;
