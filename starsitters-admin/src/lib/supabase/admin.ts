@@ -162,8 +162,6 @@ export async function fetchFamilies(): Promise<FamilyRow[]> {
   }[];
   if (rows.length === 0) return [];
 
-  rows.sort((a, b) => (a.user_id < b.user_id ? 1 : a.user_id > b.user_id ? -1 : 0));
-
   const userMap = await fetchUsersByIds(supabase, rows.map((r) => r.user_id));
 
   const familyIds = rows.map((r) => r.user_id);
@@ -181,7 +179,7 @@ export async function fetchFamilies(): Promise<FamilyRow[]> {
     }
   }
 
-  return rows.map((r) => {
+  const result = rows.map((r) => {
     const u = userMap.get(r.user_id);
     let addressText: string | null = null;
     const addr = r.home_address;
@@ -206,6 +204,12 @@ export async function fetchFamilies(): Promise<FamilyRow[]> {
       active_jobs: activeJobsByFamily[r.user_id] ?? 0,
     };
   });
+  result.sort((a, b) => {
+    const dateA = a.registered_at ? new Date(a.registered_at).getTime() : 0;
+    const dateB = b.registered_at ? new Date(b.registered_at).getTime() : 0;
+    return dateB - dateA;
+  });
+  return result;
 }
 
 export async function fetchSitters(): Promise<SitterRow[]> {
@@ -227,8 +231,6 @@ export async function fetchSitters(): Promise<SitterRow[]> {
   }[];
   if (rows.length === 0) return [];
 
-  rows.sort((a, b) => (a.user_id < b.user_id ? 1 : a.user_id > b.user_id ? -1 : 0));
-
   const userMap = await fetchUsersByIds(supabase, rows.map((r) => r.user_id));
 
   const guardianMap = new Map<string, { guardian_name: string; guardian_email: string; guardian_phone: string | null }>();
@@ -244,7 +246,7 @@ export async function fetchSitters(): Promise<SitterRow[]> {
     }
   }
 
-  return rows.map((r) => {
+  const sitterResult = rows.map((r) => {
     const u = userMap.get(r.user_id);
     const g = guardianMap.get(r.user_id);
     return {
@@ -264,6 +266,12 @@ export async function fetchSitters(): Promise<SitterRow[]> {
       guardian_phone: g?.guardian_phone ?? null,
     };
   });
+  sitterResult.sort((a, b) => {
+    const dateA = a.registered_at ? new Date(a.registered_at).getTime() : 0;
+    const dateB = b.registered_at ? new Date(b.registered_at).getTime() : 0;
+    return dateB - dateA;
+  });
+  return sitterResult;
 }
 
 export async function fetchJobs(
