@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
@@ -14,6 +14,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const router = useRouter();
+
+  // Hidden admin signup: click the logo 5 times within 3 seconds to navigate to /register
+  const logoClickCount = useRef(0);
+  const logoClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleLogoClick = useCallback(() => {
+    logoClickCount.current += 1;
+    if (logoClickTimer.current) clearTimeout(logoClickTimer.current);
+    if (logoClickCount.current >= 5) {
+      logoClickCount.current = 0;
+      router.push("/register");
+      return;
+    }
+    logoClickTimer.current = setTimeout(() => {
+      logoClickCount.current = 0;
+    }, 3000);
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,7 +75,13 @@ export default function LoginPage() {
 
       {/* Logo + Title */}
       <div className="flex flex-col items-center text-center mb-8">
-        <div className="relative w-[88px] h-[88px] mb-6 rounded-full overflow-hidden">
+        <div
+          role="button"
+          tabIndex={-1}
+          onClick={handleLogoClick}
+          className="relative w-[88px] h-[88px] mb-6 rounded-full overflow-hidden cursor-pointer select-none"
+          title=""
+        >
           <Image
             src="/images/star-sitters-logo.jpeg"
             alt="Star Sitters"
